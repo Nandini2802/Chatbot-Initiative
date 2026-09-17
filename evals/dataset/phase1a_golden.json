@@ -1,0 +1,58 @@
+[
+  {
+    "id": "eval-001",
+    "query": "Get me the Olivz brochure",
+    "expected_intent": "get_brochure",
+    "expected_card_type": "brochure",
+    "expected_entities": {"project_name": "Olivz"}
+  },
+  {
+    "id": "eval-002",
+    "query": "Show me the 2BR floor plan for Sportz",
+    "expected_intent": "get_floor_plan",
+    "expected_card_type": "floor_plan",
+    "expected_entities": {"project_name": "Sportz", "unit_type": "2BR"}
+  },
+  {
+    "id": "eval-003",
+    "query": "Is my Bayz 101 brochure up to date?",
+    "expected_intent": "check_version",
+    "expected_card_type": "version_check",
+    "expected_entities": {"project_name": "Bayz 101"}
+  },
+  {
+    "id": "eval-004",
+    "query": "What languages is the Olivz brochure available in?",
+    "expected_intent": "list_languages",
+    "expected_card_type": "language_list",
+    "expected_entities": {"project_name": "Olivz"}
+  },
+  {
+    "id": "eval-005",
+    "query": "Show me the gallery for Sportz",
+    "expected_intent": "get_gallery",
+    "expected_card_type": "gallery",
+    "expected_entities": {"project_name": "Sportz"}
+  },
+  {
+    "id": "eval-006",
+    "query": "Get me the video for Bayz 101",
+    "expected_intent": "get_video",
+    "expected_card_type": "video",
+    "expected_entities": {"project_name": "Bayz 101"}
+  },
+  {
+    "id": "eval-007",
+    "query": "Tell me about the amenities at Olivz",
+    "expected_intent": "knowledge_query",
+    "expected_card_type": "knowledge",
+    "expected_entities": {"project_name": "Olivz"}
+  },
+  {
+    "id": "eval-008",
+    "query": "brochure please",
+    "expected_intent": "get_brochure",
+    "expected_card_type": "clarification_project_name",
+    "expected_entities": {}
+  }
+]

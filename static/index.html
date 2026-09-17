@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Danube AI — Dev Test Harness</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #f0f2f5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #1a1a2e;
+      color: #fff;
+      padding: 12px 20px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    header h1 { font-size: 1rem; font-weight: 600; }
+    header .session-badge {
+      margin-left: auto;
+      font-size: 0.7rem;
+      background: #ffffff22;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-family: monospace;
+      cursor: pointer;
+      user-select: none;
+    }
+    header .session-badge:hover { background: #ffffff44; }
+
+    /* ── Main layout ── */
+    .layout {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── Chat pane ── */
+    .chat-pane {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      background: #fff;
+    }
+
+    #messages {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .msg {
+      max-width: 88%;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 0.88rem;
+      line-height: 1.5;
+      word-break: break-word;
+    }
+    .msg.user {
+      align-self: flex-end;
+      background: #1a1a2e;
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      white-space: pre-wrap;
+    }
+    .msg.bot {
+      align-self: flex-start;
+      background: #f0f2f5;
+      color: #1a1a2e;
+      border-bottom-left-radius: 4px;
+    }
+    .msg.bot.streaming { opacity: 0.85; }
+    /* markdown elements inside bot messages */
+    .msg.bot p { margin: 0 0 6px; }
+    .msg.bot p:last-child { margin-bottom: 0; }
+    .msg.bot ul, .msg.bot ol { margin: 4px 0 8px 20px; padding: 0; }
+    .msg.bot li { margin: 3px 0; }
+    .msg.bot strong { font-weight: 700; }
+    .msg.bot em { font-style: italic; }
+    .msg.bot h1, .msg.bot h2, .msg.bot h3 { font-size: 1em; font-weight: 700; margin: 6px 0 4px; }
+    .msg.bot code {
+      background: rgba(0,0,0,.08);
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: monospace;
+      font-size: .85em;
+    }
+    .msg.bot pre {
+      background: #1e1e2e;
+      color: #cdd6f4;
+      padding: 10px 14px;
+      border-radius: 8px;
+      overflow-x: auto;
+      margin: 6px 0;
+    }
+    .msg.bot pre code { background: none; padding: 0; }
+    .msg.error-msg {
+      align-self: flex-start;
+      background: #fff0f0;
+      color: #c0392b;
+      border: 1px solid #f5c6cb;
+    }
+
+    /* typing cursor */
+    .cursor::after {
+      content: "▋";
+      animation: blink 0.7s step-end infinite;
+      color: #555;
+    }
+    @keyframes blink { 50% { opacity: 0; } }
+
+    /* follow-up chips */
+    .chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      padding: 0 16px 12px;
+    }
+    .chip {
+      background: #e8edf7;
+      color: #1a1a2e;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .chip:hover { background: #c9d5f0; }
+
+    /* input area */
+    .input-area {
+      display: flex;
+      gap: 8px;
+      padding: 12px 16px;
+      border-top: 1px solid #dde1e7;
+    }
+    #queryInput {
+      flex: 1;
+      border: 1px solid #c8cdd5;
+      border-radius: 8px;
+      padding: 9px 12px;
+      font-size: 0.88rem;
+      resize: none;
+      outline: none;
+      font-family: inherit;
+      height: 42px;
+      overflow: hidden;
+    }
+    #queryInput:focus { border-color: #1a1a2e; }
+    #sendBtn {
+      background: #1a1a2e;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 0 18px;
+      font-size: 0.88rem;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    #sendBtn:hover { background: #2d2d52; }
+    #sendBtn:disabled { background: #aaa; cursor: not-allowed; }
+
+    /* ── Inline card iframe ── */
+    .inline-card {
+      align-self: flex-start;
+      width: 100%;
+      max-width: 520px;
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 1px 3px rgba(0,0,0,.06), 0 8px 32px rgba(0,0,0,.08);
+    }
+    .inline-card iframe {
+      display: block;
+      width: 100%;
+      border: none;
+    }
+
+    /* ── Debug panel ── */
+    details.debug {
+      border-top: 1px solid #dde1e7;
+      background: #1a1a2e;
+      color: #a8d8a8;
+      font-size: 0.72rem;
+      font-family: monospace;
+      flex-shrink: 0;
+    }
+    details.debug summary {
+      padding: 6px 16px;
+      cursor: pointer;
+      color: #ccc;
+      user-select: none;
+    }
+    #debugLog {
+      max-height: 160px;
+      overflow-y: auto;
+      padding: 6px 16px 10px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/marked@13/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+</head>
+<body>
+
+<header>
+  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
+    <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+  </svg>
+  <h1>Danube AI — Dev Test Harness</h1>
+  <span class="session-badge" title="Click to reset session" id="sessionBadge"></span>
+</header>
+
+<div class="layout">
+
+  <!-- Left: chat -->
+  <div class="chat-pane">
+    <div id="messages"></div>
+    <div id="chipsArea" class="chips"></div>
+    <div class="input-area">
+      <textarea id="queryInput" placeholder="Ask something… e.g. Show me the brochure for Greenz" rows="1"></textarea>
+      <button id="sendBtn">Send</button>
+    </div>
+  </div>
+
+
+
+</div>
+
+<!-- Debug log at bottom -->
+<details class="debug">
+  <summary>SSE event log</summary>
+  <div id="debugLog"></div>
+</details>
+
+<script>
+(function () {
+  // ── Session management ────────────────────────────────────────────────
+  const SESSION_KEY = "danube_session_id";
+  function newSessionId() {
+    return "sess-" + crypto.randomUUID().slice(0, 8);
+  }
+  function getSession() {
+    return sessionStorage.getItem(SESSION_KEY) || resetSession();
+  }
+  function resetSession() {
+    const id = newSessionId();
+    sessionStorage.setItem(SESSION_KEY, id);
+    document.getElementById("sessionBadge").textContent = "Session: " + id;
+    return id;
+  }
+
+  // Init
+  const initialSession = getSession();
+  document.getElementById("sessionBadge").textContent = "Session: " + initialSession;
+  document.getElementById("sessionBadge").addEventListener("click", () => {    if (confirm("Reset session? This clears conversation memory.")) {
+      resetSession();
+      document.getElementById("messages").innerHTML = "";
+      document.getElementById("chipsArea").innerHTML = "";
+      appendDebug("--- session reset ---");
+    }
+  });
+
+  // ── DOM refs ──────────────────────────────────────────────────────────
+  const messagesEl  = document.getElementById("messages");
+  const chipsArea   = document.getElementById("chipsArea");
+  const queryInput  = document.getElementById("queryInput");
+  const sendBtn     = document.getElementById("sendBtn");
+  const debugLog    = document.getElementById("debugLog");
+
+  // ── Debug log ─────────────────────────────────────────────────────────
+  function appendDebug(text) {
+    const ts = new Date().toISOString().slice(11, 23);
+    debugLog.textContent += `[${ts}] ${text}\n`;
+    debugLog.scrollTop = debugLog.scrollHeight;
+  }
+
+  // ── Inline card rendering ─────────────────────────────────────────────
+  function renderCard(html, cardType) {
+    const wrapper = document.createElement("div");
+    wrapper.className = "inline-card";
+
+    const iframe = document.createElement("iframe");
+    iframe.sandbox = "allow-same-origin allow-scripts allow-popups";
+    iframe.srcdoc = html;
+
+    // Auto-size iframe height to its content once loaded
+    iframe.addEventListener("load", () => {
+      try {
+        const h = iframe.contentDocument.documentElement.scrollHeight;
+        iframe.style.height = h + "px";
+      } catch (_) {
+        iframe.style.height = "400px";
+      }
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    });
+
+    wrapper.appendChild(iframe);
+    messagesEl.appendChild(wrapper);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    appendDebug(`html_block rendered inline — card_type="${cardType}", ${html.length} chars`);
+  }
+
+  // ── Message helpers ───────────────────────────────────────────────────
+  function addUserMsg(text) {
+    const el = document.createElement("div");
+    el.className = "msg user";
+    el.textContent = text;
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  let botMsgEl = null;
+  let rawMd = ""; // accumulates full markdown as tokens arrive
+
+  marked.setOptions({ breaks: true, gfm: true });
+
+  function startBotMsg() {
+    rawMd = "";
+    botMsgEl = document.createElement("div");
+    botMsgEl.className = "msg bot streaming cursor";
+    messagesEl.appendChild(botMsgEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  function appendToken(text) {
+    if (!botMsgEl) startBotMsg();
+    rawMd += text;
+    botMsgEl.innerHTML = DOMPurify.sanitize(marked.parse(rawMd));
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+  function finalizeBotMsg() {
+    if (botMsgEl) {
+      botMsgEl.innerHTML = DOMPurify.sanitize(marked.parse(rawMd));
+      botMsgEl.classList.remove("streaming", "cursor");
+      botMsgEl = null;
+    }
+  }
+  function addErrorMsg(text) {
+    finalizeBotMsg();
+    const el = document.createElement("div");
+    el.className = "msg error-msg";
+    el.textContent = "⚠ " + text;
+    messagesEl.appendChild(el);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  // ── Follow-up chips ───────────────────────────────────────────────────
+  function renderChips(chips) {
+    chipsArea.innerHTML = "";
+    chips.forEach(label => {
+      const btn = document.createElement("button");
+      btn.className = "chip";
+      btn.textContent = label;
+      btn.addEventListener("click", () => {
+        queryInput.value = label;
+        sendQuery();
+      });
+      chipsArea.appendChild(btn);
+    });
+  }
+
+  // ── SSE stream consumer ───────────────────────────────────────────────
+  async function sendQuery() {
+    const query = queryInput.value.trim();
+    if (!query) return;
+
+    queryInput.value = "";
+    sendBtn.disabled = true;
+    chipsArea.innerHTML = "";
+    addUserMsg(query);
+    startBotMsg();
+    appendDebug(`→ POST /api/v1/chat/query  query="${query}"`);
+
+    const sessionId = getSession();
+
+    let response;
+    try {
+      response = await fetch("/api/v1/chat/query", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query, session_id: sessionId }),
+      });
+    } catch (err) {
+      addErrorMsg("Network error: " + err.message);
+      sendBtn.disabled = false;
+      return;
+    }
+
+    if (!response.ok) {
+      const text = await response.text();
+      addErrorMsg(`HTTP ${response.status}: ${text}`);
+      sendBtn.disabled = false;
+      return;
+    }
+
+    const reader  = response.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = "";
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+
+        // Split on double-newline (SSE event separator)
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop(); // keep incomplete trailing chunk
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data:")) continue;
+
+          let payload;
+          try {
+            payload = JSON.parse(line.slice(5).trim());
+          } catch {
+            appendDebug("parse error: " + line);
+            continue;
+          }
+
+          appendDebug("← " + JSON.stringify(payload));
+
+          switch (payload.type) {
+            case "token":
+              appendToken(payload.text);
+              break;
+
+            case "html_block":
+              if (payload.html && payload.html.trim()) {
+                // Finalize any in-progress bot text, then render card inline
+                finalizeBotMsg();
+                renderCard(payload.html, payload.card_type);
+                // Start a fresh bot message for the commentary that follows
+                startBotMsg();
+              }
+              break;
+
+            case "followups":
+              renderChips(payload.chips || []);
+              break;
+
+            case "status":
+              appendDebug("status: " + payload.text);
+              break;
+
+            case "error":
+              addErrorMsg(payload.message || "Unknown error");
+              break;
+
+            case "done":
+              finalizeBotMsg();
+              if (payload.run_id) appendDebug(`run_id: ${payload.run_id}`);
+              break;
+
+            default:
+              appendDebug("unknown event: " + JSON.stringify(payload));
+          }
+        }
+      }
+    } catch (err) {
+      addErrorMsg("Stream error: " + err.message);
+    } finally {
+      finalizeBotMsg();
+      sendBtn.disabled = false;
+      queryInput.focus();
+    }
+  }
+
+  // ── Event listeners ───────────────────────────────────────────────────
+  sendBtn.addEventListener("click", sendQuery);
+  queryInput.addEventListener("keydown", e => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendQuery();
+    }
+  });
+
+  // Auto-resize textarea
+  queryInput.addEventListener("input", () => {
+    queryInput.style.height = "42px";
+    queryInput.style.height = Math.min(queryInput.scrollHeight, 120) + "px";
+  });
+
+  queryInput.focus();
+  appendDebug("Danube AI test harness ready. Session: " + initialSession);
+})();
+</script>
+</body>
+</html>
