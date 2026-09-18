@@ -291,23 +291,74 @@
     debugLog.scrollTop = debugLog.scrollHeight;
   }
 
+  // ── Handle external URLs from card iframe ─────────────────────────────
+  window.addEventListener("message", (event) => {
+    if (event.data?.type !== "open_external_url") return;
+
+    const url = event.data.url;
+
+    if (!url) return;
+
+    try {
+      const parsed = new URL(url);
+
+      if (parsed.protocol !== "https:") {
+        console.error("Blocked non-HTTPS URL:", url);
+        return;
+      }
+
+      window.open(url, "_blank", "noopener,noreferrer");
+
+    } catch (err) {
+      console.error("Invalid URL:", url);
+    }
+  });
+
+
   // ── Inline card rendering ─────────────────────────────────────────────
   function renderCard(html, cardType) {
     const wrapper = document.createElement("div");
     wrapper.className = "inline-card";
 
     const iframe = document.createElement("iframe");
-    iframe.sandbox = "allow-same-origin allow-scripts allow-popups";
+    iframe.sandbox = "allow-scripts allow-same-origin allow-downloads";
     iframe.srcdoc = html;
 
     // Auto-size iframe height to its content once loaded
     iframe.addEventListener("load", () => {
       try {
-        const h = iframe.contentDocument.documentElement.scrollHeight;
+        const doc = iframe.contentDocument;
+
+        // Auto-size iframe
+        const h = doc.documentElement.scrollHeight;
         iframe.style.height = h + "px";
-      } catch (_) {
+
+        // Handle download links from cards
+        const downloadLinks = doc.querySelectorAll("a[href]");
+
+        downloadLinks.forEach(link => {
+          link.addEventListener("click", (event) => {
+            event.preventDefault();
+
+            const url = link.getAttribute("href");
+
+            if (!url) return;
+
+            console.log("Opening download URL:", url);
+
+            window.open(
+              url,
+              "_blank",
+              "noopener,noreferrer"
+            );
+          });
+        });
+
+      } catch (err) {
+        console.error("Card iframe setup failed:", err);
         iframe.style.height = "400px";
       }
+
       messagesEl.scrollTop = messagesEl.scrollHeight;
     });
 
