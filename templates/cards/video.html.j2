@@ -57,28 +57,124 @@
   .download-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
   .download-btn:active { transform: translateY(0); }
   .download-btn svg { width: 20px; height: 20px; }
+  .download-all-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 48px;
+    margin-top: 8px;
+    padding: 12px 18px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #e0aa4a 0%, #c9963a 100%);
+    color: #16171a;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-decoration: none;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
 <div class="file-stack">
-  <div class="file-card">
-    <span class="file-icon">
-      <svg width="22" height="24" viewBox="0 0 14 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M8.75684 0.00195312C9.06266 0.00413089 9.36571 0.0637311 9.64844 0.180664C9.93799 0.300563 10.2016 0.476301 10.4229 0.698242H10.4219L13.0771 3.35254L13.2354 3.52637C13.3841 3.70725 13.5058 3.90978 13.5957 4.12695C13.7081 4.39855 13.7668 4.68888 13.7734 4.98242C13.7753 5.00148 13.7793 5.02049 13.7793 5.04004C13.7793 5.05017 13.7769 5.0603 13.7764 5.07031V13.9209C13.7764 14.4726 13.5571 15.0025 13.167 15.3926C12.7769 15.7826 12.247 16.001 11.6953 16.001C11.3643 16.0006 11.0957 15.7325 11.0957 15.4014C11.0958 15.0703 11.3643 14.8021 11.6953 14.8018C11.9287 14.8018 12.1533 14.7089 12.3184 14.5439C12.4835 14.3789 12.5762 14.1543 12.5762 13.9209V5.64062H9.47852C9.12335 5.64057 8.78251 5.49907 8.53125 5.24805C8.28002 4.99675 8.13867 4.65516 8.13867 4.2998V1.19922H2.81348C2.58008 1.19931 2.35545 1.29204 2.19043 1.45703C2.02543 1.62206 1.93266 1.84677 1.93262 2.08008V8.00098C1.93237 8.33214 1.66423 8.60059 1.33301 8.60059C1.00195 8.6004 0.733644 8.33202 0.733398 8.00098V2.08008C0.733443 1.52846 0.952711 0.998454 1.34277 0.608398C1.7328 0.218649 2.26208 9.04583e-05 2.81348 0H8.73828C8.74444 0 8.75072 0.00176917 8.75684 0.00195312ZM5.04102 10.3535C5.64612 10.3536 6.15692 10.7548 6.32324 11.3057L7.71777 10.5V10.501C7.88047 10.4056 8.06526 10.3547 8.25391 10.3535C8.39721 10.3527 8.53934 10.3802 8.6709 10.4346L8.79883 10.498L8.91699 10.5771C8.99196 10.6351 9.05898 10.7028 9.11621 10.7783L9.19531 10.8975L9.25684 11.0264C9.30879 11.1557 9.335 11.2944 9.33398 11.4346V14.9219C9.33183 15.1092 9.28102 15.2933 9.18652 15.4551C9.09199 15.6169 8.95709 15.7518 8.79492 15.8457C8.63286 15.9395 8.44897 15.9897 8.26172 15.9912C8.07435 15.9927 7.88918 15.9449 7.72559 15.8535L7.71777 15.8496L6.32324 15.043C6.15634 15.5931 5.64545 15.994 5.04102 15.9941H1.33984C0.599889 15.994 3.24442e-05 15.3934 0 14.6533V11.6934C0 10.9533 0.599869 10.3537 1.33984 10.3535H5.04102ZM1.33984 11.5527C1.26246 11.5529 1.19922 11.6161 1.19922 11.6934V14.6533C1.19925 14.7305 1.26248 14.7938 1.33984 14.7939H5.04102C5.11838 14.7938 5.18063 14.7305 5.18066 14.6533V14.1074C5.1736 14.0529 5.17242 13.9976 5.18066 13.9424V12.4062C5.1725 12.351 5.17352 12.2958 5.18066 12.2412V11.6934C5.18066 11.6162 5.1184 11.5529 5.04102 11.5527H1.33984ZM6.38086 12.6602V13.6885L8.13379 14.7031V11.6455L6.38086 12.6602ZM9.33789 4.2998C9.33789 4.33683 9.35276 4.37315 9.37891 4.39941C9.40515 4.42565 9.44138 4.44038 9.47852 4.44043H12.4131C12.3625 4.3539 12.3018 4.27318 12.2305 4.20215H12.2295L9.57324 1.54688L9.57227 1.5459C9.502 1.47545 9.42307 1.41479 9.33789 1.36426V4.2998Z" fill="currentColor"/>
-      </svg>
-    </span>
-    <div class="file-info">
-      <div class="file-name">{{ project }} Video</div>
-      <div class="file-meta">{% if duration_seconds %}{{ (duration_seconds // 60) }}m {{ (duration_seconds % 60) }}s{% endif %}</div>
+
+  {% if files %}
+
+    {% for file in files %}
+    <div class="file-card">
+
+      <span class="file-icon">
+        <!-- Keep your existing video SVG here -->
+      </span>
+
+      <div class="file-info">
+
+        <div class="file-name">
+          {{ file.name }}
+        </div>
+
+        <div class="file-meta">
+          {% if file.file_size_bytes %}
+            {{ (file.file_size_bytes / 1048576) | round(1) }} MB
+          {% endif %}
+        </div>
+
+      </div>
+
+      <a
+        class="download-btn"
+        href="{{ file.download_url }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Download">
+
+        <svg viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="2.2"
+             stroke-linecap="round"
+             stroke-linejoin="round">
+          <path d="M12 3v12"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <path d="M5 21h14"/>
+        </svg>
+
+      </a>
+
     </div>
-    {% if stream_url %}
-    <a class="download-btn" href="{{ stream_url }}" target="_blank" rel="noopener noreferrer" download title="Download">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 21h14"/>
-      </svg>
+    {% endfor %}
+
+
+    {% if zip_url %}
+    <a
+      class="download-all-btn"
+      href="{{ zip_url }}"
+      target="_blank"
+      rel="noopener noreferrer">
+
+      DOWNLOAD ALL VIDEOS
+
     </a>
     {% endif %}
-  </div>
+
+
+  {% else %}
+
+    {# Existing language-specific single video #}
+
+    <div class="file-card">
+
+      <div class="file-info">
+        <div class="file-name">
+          {{ project }} Video
+        </div>
+      </div>
+
+      {% if stream_url %}
+      <a
+        class="download-btn"
+        href="{{ stream_url }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Download">
+
+        <svg viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="2.2">
+          <path d="M12 3v12"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <path d="M5 21h14"/>
+        </svg>
+
+      </a>
+      {% endif %}
+
+    </div>
+
+  {% endif %}
+
 </div>
 </body>
 </html>
