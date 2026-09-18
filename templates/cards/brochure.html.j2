@@ -57,28 +57,142 @@
   .download-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
   .download-btn:active { transform: translateY(0); }
   .download-btn svg { width: 20px; height: 20px; }
+  .download-all-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    min-height: 48px;
+    margin-top: 8px;
+    padding: 12px 18px;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #e0aa4a 0%, #c9963a 100%);
+    color: #16171a;
+    font-size: 13px;
+    font-weight: 700;
+    letter-spacing: .4px;
+    text-decoration: none;
+    cursor: pointer;
+  }
 </style>
 </head>
 <body>
 <div class="file-stack">
-  <div class="file-card">
-    <span class="file-icon">
-      <svg width="20" height="26" viewBox="0 0 12 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-        <path d="M7.5 0L12 4.5V14C12 14.5304 11.7891 15.039 11.4141 15.4141C11.039 15.7891 10.5304 16 10 16H2C1.4696 16 0.961003 15.7891 0.585938 15.4141C0.210867 15.039 2.21006e-06 14.5304 0 14V2C0 1.46957 0.210865 0.96101 0.585938 0.585938C0.961004 0.210905 1.4696 0 2 0H7.5ZM2 1C1.73481 1 1.4805 1.10547 1.29297 1.29297C1.10543 1.4805 1 1.73478 1 2V14C1 14.2652 1.10543 14.5195 1.29297 14.707C1.4805 14.8945 1.73482 15 2 15H10C10.2652 15 10.5195 14.8945 10.707 14.707C10.8945 14.5195 11 14.2652 11 14V4.5H9C8.60221 4.5 8.22075 4.34181 7.93945 4.06055C7.65815 3.77924 7.5 3.39782 7.5 3V1H2ZM6.46191 5.5752C6.56343 5.59684 6.65877 5.64102 6.74121 5.7041C6.8237 5.76723 6.89104 5.84802 6.93848 5.94043C7.02643 6.1044 7.05843 6.29656 7.06543 6.47852C7.07239 6.66633 7.0535 6.87405 7.01855 7.0918C6.93458 7.60167 6.74893 8.22593 6.49902 8.88574C6.77513 9.47564 7.10258 10.0404 7.47852 10.5723C7.92357 10.5375 8.3713 10.5541 8.8125 10.6221C9.17639 10.688 9.54644 10.8171 9.77246 11.0869C9.89246 11.2309 9.96566 11.4075 9.97266 11.6055C9.97959 11.7973 9.92583 11.9871 9.83496 12.168C9.75613 12.3357 9.63343 12.4793 9.48047 12.584C9.32919 12.6823 9.15093 12.7313 8.9707 12.7227C8.6399 12.7087 8.31697 12.5265 8.03809 12.3057C7.69886 12.0253 7.39286 11.7061 7.12695 11.3555C6.45086 11.4325 5.78237 11.5676 5.12988 11.7607C4.83109 12.2907 4.48947 12.7964 4.10938 13.2715C3.81745 13.6213 3.50052 13.9276 3.18262 14.0586C2.99979 14.1405 2.79261 14.1502 2.60254 14.0869C2.40714 14.0098 2.25019 13.859 2.16504 13.667C1.97004 13.279 2.03512 12.8914 2.24512 12.5654C2.4431 12.2585 2.77066 11.9973 3.1416 11.7783C3.61161 11.5119 4.10876 11.2952 4.62402 11.1328C5.0234 10.4132 5.37779 9.66954 5.68555 8.90625C5.50212 8.48901 5.35844 8.05541 5.25586 7.61133C5.16989 7.21146 5.13705 6.81551 5.20996 6.47559C5.28494 6.12168 5.48357 5.80339 5.85938 5.65234C6.05137 5.57534 6.25991 5.5322 6.46191 5.5752ZM3.98145 12.1865C3.8149 12.2631 3.66171 12.3419 3.52246 12.4238C3.19478 12.6176 2.98208 12.8068 2.87598 12.9707C2.78198 13.1157 2.77994 13.221 2.83594 13.332C2.84648 13.3531 2.85469 13.3679 2.86133 13.376L2.89648 13.3643C3.03347 13.3083 3.25129 13.1289 3.53125 12.792C3.69062 12.5973 3.84113 12.3954 3.98145 12.1865ZM8.06836 11.3076C8.21865 11.4704 8.36392 11.6061 8.50293 11.7158C8.74293 11.9058 8.90998 11.9697 9.00098 11.9727C9.02517 11.9763 9.04977 11.9703 9.07031 11.957C9.11215 11.9244 9.14531 11.8813 9.16504 11.832C9.20035 11.7711 9.22028 11.7022 9.22363 11.6318C9.22254 11.6086 9.21297 11.5866 9.19727 11.5693C9.14519 11.5073 8.99747 11.4173 8.67969 11.3604C8.47758 11.3271 8.27318 11.3096 8.06836 11.3076ZM6.12207 9.80566C5.96516 10.1601 5.79836 10.5102 5.62207 10.8555V10.8564C5.95595 10.7789 6.29287 10.7141 6.63184 10.6631C6.45012 10.3845 6.28001 10.0984 6.12207 9.80566ZM6.2832 6.30957C6.2333 6.31555 6.18456 6.32911 6.13867 6.34961C6.05178 6.38461 5.98038 6.45513 5.94238 6.63184C5.90239 6.82381 5.91231 7.10118 5.98828 7.4541C6.01213 7.56472 6.04243 7.67933 6.07812 7.79785C6.16116 7.52706 6.22769 7.25151 6.27734 6.97266C6.30801 6.78466 6.32076 6.62884 6.31543 6.50684C6.31591 6.4397 6.30482 6.37314 6.2832 6.30957Z" fill="currentColor"/>
-      </svg>
-    </span>
-    <div class="file-info">
-      <div class="file-name">{{ project }} Brochure{% if version_label %} ({{ version_label }}){% endif %}</div>
-      <div class="file-meta">{% if file_size_bytes %}{{ (file_size_bytes / 1048576) | round(1) }} MB{% endif %}</div>
+
+  {% if files %}
+
+    {# Multiple brochures #}
+    {% for file in files %}
+    <div class="file-card">
+
+      <span class="file-icon">
+        <svg width="20" height="26" viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+      </span>
+
+      <div class="file-info">
+
+        <div class="file-name">
+          {{ file.name }}
+        </div>
+
+        <div class="file-meta">
+          {% if file.file_size_bytes %}
+            {{ (file.file_size_bytes / 1048576) | round(1) }} MB
+          {% endif %}
+        </div>
+
+      </div>
+
+      <a
+        class="download-btn"
+        href="{{ file.download_url }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Download">
+
+        <svg viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="2.2"
+             stroke-linecap="round"
+             stroke-linejoin="round">
+          <path d="M12 3v12"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <path d="M5 21h14"/>
+        </svg>
+
+      </a>
+
     </div>
-    {% if download_url %}
-    <a class="download-btn" href="{{ download_url }}" target="_blank" rel="noopener noreferrer" download title="Download">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M12 3v12"/><polyline points="7 10 12 15 17 10"/><path d="M5 21h14"/>
-      </svg>
+    {% endfor %}
+
+
+    {% if zip_url %}
+    <a
+      class="download-all-btn"
+      href="{{ zip_url }}"
+      target="_blank"
+      rel="noopener noreferrer">
+
+      DOWNLOAD ALL BROCHURES
+
     </a>
     {% endif %}
-  </div>
+
+
+  {% else %}
+
+    {# Existing single language-specific brochure #}
+
+    <div class="file-card">
+
+      <div class="file-info">
+
+        <div class="file-name">
+          {{ project }} Brochure
+          {% if version_label %}
+            ({{ version_label }})
+          {% endif %}
+        </div>
+
+        <div class="file-meta">
+          {% if file_size_bytes %}
+            {{ (file_size_bytes / 1048576) | round(1) }} MB
+          {% endif %}
+        </div>
+
+      </div>
+
+      {% if download_url %}
+      <a
+        class="download-btn"
+        href="{{ download_url }}"
+        target="_blank"
+        rel="noopener noreferrer"
+        title="Download">
+
+        <svg viewBox="0 0 24 24"
+             fill="none"
+             stroke="currentColor"
+             stroke-width="2.2">
+          <path d="M12 3v12"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <path d="M5 21h14"/>
+        </svg>
+
+      </a>
+      {% endif %}
+
+    </div>
+
+  {% endif %}
+
 </div>
 
 </body>
