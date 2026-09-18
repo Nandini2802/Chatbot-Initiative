@@ -36,7 +36,6 @@ from modules.phase1a.cards import (
 logger = logging.getLogger(__name__)
 
 _TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "templates" / "cards"
-
 _jinja_env = Environment(
     loader=FileSystemLoader(str(_TEMPLATES_DIR)),
     autoescape=select_autoescape(["html", "j2"]),
@@ -75,7 +74,7 @@ async def build_card(
         span.set_attribute("tenant_id", user.tenant_id)
 
         project_name = entities.get("project_name", "")
-        language = entities.get("language") or "en"
+        language = entities.get("language")
         unit_type = entities.get("unit_type")
         gallery_subfolder = entities.get("gallery_subfolder")  # e.g. "interiors", "exteriors"
 
@@ -102,27 +101,86 @@ async def build_card(
 
 async def _build_brochure(
     project_name: str,
-    language: str,
+    language: Optional[str],
     user: UserContext,
     unit_type: Optional[str] = None,
-) -> tuple[BrochureCard, str, str]:
-    row: AssetRow = await asset_registry.get_asset(
+):
+    # --------------------------------------------------
+    # CASE 1: Language explicitly specified
+    # Return ONE individual brochure
+    # --------------------------------------------------
+    if language:
+        row: AssetRow = await asset_registry.get_asset(
+            project_name=project_name,
+            asset_type="brochure",
+            user=user,
+            language=language,
+        )
+
+        card = BrochureCard(
+            project=row.project_name,
+            language=row.language,
+            version_label=row.version_label,
+            download_url=row.blob_path,
+            file_size_bytes=None,
+            content_type=row.content_type,
+        )
+
+        html = _render(
+            "brochure.html.j2",
+            {
+                **card.model_dump(),
+                "files": None,
+                "zip_url": None,
+            },
+        )
+
+        return card, "brochure", html
+
+    # --------------------------------------------------
+    # CASE 2: No language
+    # Return ALL individual brochures
+    # --------------------------------------------------
+    rows = await asset_registry.get_all_assets(
         project_name=project_name,
         asset_type="brochure",
         user=user,
-        language=language,
+        language=None,
     )
-    signed_url = await get_signed_url(row.blob_path)
 
-    card = BrochureCard(
-        project=row.project_name,
-        language=row.language,
-        version_label=row.version_label,
-        download_url=signed_url,
-        file_size_bytes=None,
-        content_type=row.content_type,
+    files = [
+        {
+            "name": row.file_name,
+            "download_url": row.blob_path,
+            "file_size_bytes": row.file_size_bytes,
+        }
+        for row in rows
+    ]
+
+    zip_url = await asset_registry.get_folder_zip_url(
+        project_name=project_name,
+        folder_key="brochures",
     )
-    html = _render("brochure.html.j2", card.model_dump())
+
+    # Card object kept for existing application contract
+    card = BrochureCard(
+        project=project_name,
+        language="all",
+        version_label=None,
+        download_url=zip_url,
+        file_size_bytes=None,
+        content_type="application/zip",
+    )
+
+    html = _render(
+        "brochure.html.j2",
+        {
+            **card.model_dump(),
+            "files": files,
+            "zip_url": zip_url,
+        },
+    )
+
     return card, "brochure", html
 
 
@@ -153,7 +211,7 @@ async def _build_floor_plan(
 
     card = FloorPlanCard(
         project=rows[0].project_name,
-        language=language,
+        language=language or "all",
         preview_images=preview_images,
         total_images=total,
         zip_url=zip_url,
@@ -214,24 +272,79 @@ async def _build_gallery(
 
 async def _build_video(
     project_name: str,
-    language: str,
+    language: Optional[str],
     user: UserContext,
     unit_type: Optional[str] = None,
-) -> tuple[VideoCard, str, str]:
-    row: AssetRow = await asset_registry.get_asset(
+):
+    # --------------------------------------------------
+    # CASE 1: Language explicitly specified
+    # Return ONE individual video
+    # --------------------------------------------------
+    if language:
+        row: AssetRow = await asset_registry.get_asset(
+            project_name=project_name,
+            asset_type="video",
+            user=user,
+            language=language,
+        )
+
+        card = VideoCard(
+            project=row.project_name,
+            stream_url=row.blob_path,
+            language=row.language,
+        )
+
+        html = _render(
+            "video.html.j2",
+            {
+                **card.model_dump(),
+                "files": None,
+                "zip_url": None,
+            },
+        )
+
+        return card, "video", html
+
+    # --------------------------------------------------
+    # CASE 2: No language
+    # Return ALL individual videos
+    # --------------------------------------------------
+    rows = await asset_registry.get_all_assets(
         project_name=project_name,
         asset_type="video",
         user=user,
-        language=language,
+        language=None,
     )
-    signed_url = await get_signed_url(row.blob_path)
+
+    files = [
+        {
+            "name": row.file_name,
+            "download_url": row.blob_path,
+            "file_size_bytes": row.file_size_bytes,
+        }
+        for row in rows
+    ]
+
+    zip_url = await asset_registry.get_folder_zip_url(
+        project_name=project_name,
+        folder_key="videos",
+    )
 
     card = VideoCard(
-        project=row.project_name,
-        stream_url=signed_url,
-        language=row.language,
+        project=project_name,
+        stream_url=zip_url,
+        language="all",
     )
-    html = _render("video.html.j2", card.model_dump())
+
+    html = _render(
+        "video.html.j2",
+        {
+            **card.model_dump(),
+            "files": files,
+            "zip_url": zip_url,
+        },
+    )
+
     return card, "video", html
 
 
@@ -265,7 +378,7 @@ async def build_version_card(
     """Build and render a version_check card. Returns (html, card_type)."""
     project_name = entities.get("project_name", "")
     asset_type = entities.get("asset_type", "brochure")
-    language = entities.get("language", "en")
+    language = entities.get("language")
 
     versions: list[VersionRow] = await asset_registry.get_versions(
         project_name=project_name,
