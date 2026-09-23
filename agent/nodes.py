@@ -12,6 +12,7 @@ import logging
 from langchain_core.callbacks import adispatch_custom_event
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agent import state
 from agent.state import (
     AgentState,
     ClarificationState,
@@ -135,6 +136,18 @@ async def intent_node(state: AgentState) -> dict:
         logger.error("intent_classification_failed", extra={"query": query[:100]})
         return {"intent": "out_of_scope", "entities": {}, "confidence": 0.0}
 
+    previous_context = state.get("conversation_context") or {}
+    extracted_project = entities.get("project_name")
+    previous_project = previous_context.get("project_name")
+
+    if not extracted_project and previous_project:
+        entities["project_name"] = previous_project
+
+    new_context = dict(previous_context)
+
+    if extracted_project:
+        new_context["project_name"] = extracted_project
+
     logger.info(
         "intent_classified",
         extra={
@@ -159,6 +172,7 @@ async def intent_node(state: AgentState) -> dict:
             "confidence": confidence,
             "clarification": cs,
             "path": "clarify",
+            "conversation_context": new_context,
         }
 
     return {
@@ -166,6 +180,7 @@ async def intent_node(state: AgentState) -> dict:
         "entities": entities,
         "confidence": confidence,
         "clarification": None,
+        "conversation_context": new_context,
     }
 
 

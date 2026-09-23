@@ -13,11 +13,6 @@ class Environment(str, Enum):
     production = "production"
 
 
-class StorageBackend(str, Enum):
-    local = "local"
-    azure = "azure"
-
-
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=(".env.local", ".env"),
@@ -60,14 +55,14 @@ class Settings(BaseSettings):
     # ── Database ──────────────────────────────────────────────────────────
     postgres_url: str = "postgresql+asyncpg://danube:danube@localhost:5432/danube"
 
+    # ── Marketing collateral snapshot (written by scripts/sync_marketing_collateral.py)
+    collateral_snapshot_path: str = "./data/marketing_collateral.json"
+
     # ── Asset metadata API (wired up later — dummy registry used for now) ──────
     asset_api_base_url: str = ""   # e.g. https://your-api.com/api
 
     # ── Storage ───────────────────────────────────────────────────────────
-    storage_backend: StorageBackend = StorageBackend.local
     local_storage_path: str = "./local_storage"
-    azure_storage_account_url: str = ""
-    azure_storage_container_name: str = "danube-assets"
 
     # ── Signed URLs ────────────────────────────────────────────────────────
     signed_url_ttl_seconds: int = 900

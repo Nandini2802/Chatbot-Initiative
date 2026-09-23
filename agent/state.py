@@ -53,6 +53,8 @@ class AgentState(TypedDict, total=False):
     genie_conv_id: Optional[str]
     filter_state: Optional[dict]
 
+    conversation_context: dict | None
+
 
 def clarification_state_factory(
     intent: str,

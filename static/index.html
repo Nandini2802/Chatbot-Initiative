@@ -496,11 +496,10 @@
 
             case "html_block":
               if (payload.html && payload.html.trim()) {
-                // Finalize any in-progress bot text, then render card inline
+                // Text/paragraph is complete.
+                // Render downloadable files below it.
                 finalizeBotMsg();
                 renderCard(payload.html, payload.card_type);
-                // Start a fresh bot message for the commentary that follows
-                startBotMsg();
               }
               break;
 

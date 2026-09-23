@@ -2,7 +2,8 @@
 sync_marketing_collateral.py
 ────────────────────────────
 One-time and scheduled sync: fetches all projects + assets from the
-middleware marketing_collateral API and upserts them into Postgres.
+middleware marketing_collateral API and writes them to a JSON snapshot
+consumed by modules.phase1a.collateral_store.
 
 Usage:
     python scripts/sync_marketing_collateral.py           # full sync
@@ -11,23 +12,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import asyncio
+import json
 import logging
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from sqlalchemy import text
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-# Ensure the shared package directory is on the path when run directly.
-project_root = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(project_root))
+# Ensure project root is on the path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
-
-from core.db.session import AsyncSessionLocal, engine, Base
-from core.db.models import MarketingCollateralProject, MarketingCollateralAsset
+from core.settings import settings
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -39,6 +35,7 @@ API_HEADERS = {
     "Accept": "application/json",
     "User-Agent": "Mozilla/5.0",
 }
+
 
 
 def fetch_from_api() -> list[dict]:
@@ -60,7 +57,6 @@ def build_project_row(item: dict) -> dict:
         "thumb_large": item.get("project_thumb_large"),
         "thumb_med": item.get("project_thumb_med"),
         "thumb_thumb": item.get("project_thumb_thumb"),
-        "synced_at": datetime.now(timezone.utc),
     }
 
 
@@ -74,7 +70,7 @@ def build_asset_rows(item: dict) -> list[dict]:
             uploaded_at = None
             if uploaded_raw:
                 try:
-                    uploaded_at = datetime.strptime(uploaded_raw, "%Y-%m-%d %H:%M:%S")
+                    uploaded_at = datetime.strptime(uploaded_raw, "%Y-%m-%d %H:%M:%S").isoformat()
                 except ValueError:
                     pass
             rows.append({
@@ -89,18 +85,24 @@ def build_asset_rows(item: dict) -> list[dict]:
                 "size_bytes": asset.get("size"),
                 "uploaded_at": uploaded_at,
                 "is_active": True,
-                "synced_at": datetime.now(timezone.utc),
             })
     return rows
 
 
-async def ensure_tables() -> None:
-    """Create tables if they don't exist (idempotent)."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+def write_snapshot(path: Path, projects: list[dict], assets: list[dict]) -> None:
+    """Write atomically so a running app never reads a half-written file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "synced_at": datetime.now(timezone.utc).isoformat(),
+        "projects": projects,
+        "assets": assets,
+    }
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
 
 
-async def sync(dry_run: bool = False) -> None:
+def sync(dry_run: bool = False) -> None:
     items = fetch_from_api()
 
     project_rows = [build_project_row(item) for item in items]
@@ -108,56 +110,20 @@ async def sync(dry_run: bool = False) -> None:
     for item in items:
         asset_rows.extend(build_asset_rows(item))
 
-    logger.info(f"Projects to upsert: {len(project_rows)}")
-    logger.info(f"Assets to upsert:   {len(asset_rows)}")
+    logger.info(f"Projects to write: {len(project_rows)}")
+    logger.info(f"Assets to write:   {len(asset_rows)}")
 
     if dry_run:
-        logger.info("Dry run — no DB writes.")
+        logger.info("Dry run — no snapshot written.")
         return
 
-    await ensure_tables()
-
-    async with AsyncSessionLocal() as session:
-        async with session.begin():
-            # ── Upsert projects ───────────────────────────────────────────
-            stmt = pg_insert(MarketingCollateralProject).values(project_rows)
-            stmt = stmt.on_conflict_do_update(
-                index_elements=["marketing_collateral_id"],
-                set_={
-                    "project_title":   stmt.excluded.project_title,
-                    "project_location": stmt.excluded.project_location,
-                    "thumb_full":      stmt.excluded.thumb_full,
-                    "thumb_large":     stmt.excluded.thumb_large,
-                    "thumb_med":       stmt.excluded.thumb_med,
-                    "thumb_thumb":     stmt.excluded.thumb_thumb,
-                    "synced_at":       stmt.excluded.synced_at,
-                },
-            )
-            await session.execute(stmt)
-
-            # ── Mark all existing assets inactive, then upsert fresh data ─
-            await session.execute(
-                text("UPDATE marketing_collateral_assets SET is_active = false")
-            )
-            stmt = pg_insert(MarketingCollateralAsset).values(asset_rows)
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_mc_asset_relative_path",
-                set_={
-                    "url":           stmt.excluded.url,
-                    "mime_type":     stmt.excluded.mime_type,
-                    "size_bytes":    stmt.excluded.size_bytes,
-                    "uploaded_at":   stmt.excluded.uploaded_at,
-                    "is_active":     True,
-                    "synced_at":     stmt.excluded.synced_at,
-                },
-            )
-            await session.execute(stmt)
-
-    logger.info("Sync complete.")
+    path = Path(settings.collateral_snapshot_path)
+    write_snapshot(path, project_rows, asset_rows)
+    logger.info(f"Sync complete. Snapshot written to {path.resolve()}")
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Sync marketing collateral to Postgres")
-    parser.add_argument("--dry-run", action="store_true", help="Fetch only, no DB writes")
+    parser = argparse.ArgumentParser(description="Sync marketing collateral to a JSON snapshot")
+    parser.add_argument("--dry-run", action="store_true", help="Fetch only, no snapshot write")
     args = parser.parse_args()
-    asyncio.run(sync(dry_run=args.dry_run))
+    sync(dry_run=args.dry_run)

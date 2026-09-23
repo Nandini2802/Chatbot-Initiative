@@ -27,6 +27,7 @@ Usage:
     python scripts/bulk_ingest.py --projects-root "D:/Codes/Danube one Chatbot/danube_projects"
     python scripts/bulk_ingest.py --projects-root "D:/..." --dry-run
 """
+print('_')
 from __future__ import annotations
 
 import argparse

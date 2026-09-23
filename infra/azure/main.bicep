@@ -42,7 +42,6 @@ resource containerApp 'Microsoft.App/containerApps@2023-05-01' = {
           }
           env: [
             { name: 'ENVIRONMENT', value: environment }
-            { name: 'STORAGE_BACKEND', value: 'azure' }
           ]
         }
       ]

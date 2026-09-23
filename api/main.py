@@ -9,7 +9,6 @@ Startup order:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 from core.observability import configure_langsmith, configure_tracing
 configure_langsmith()
@@ -74,10 +73,9 @@ if settings.environment.value == "local":
     )
 
 # ── Dev test UI ───────────────────────────────────────────────────────────────
-ui_directory = Path(__file__).resolve().parents[1] / "static"
 app.mount(
     "/ui",
-    StaticFiles(directory=ui_directory, html=True),
+    StaticFiles(directory="static", html=True),
     name="ui",
 )
 

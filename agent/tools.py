@@ -80,7 +80,7 @@ async def retrieve_asset_node(state: AgentState) -> dict:
             await adispatch_custom_event(
                 "html_block",
                 {
-                    "html": f'<div class="not-found-card"><p>{exc}</p></div>',
+                    "html": f'<div class="not-found-card">{exc}</div>',
                     "card_type": "not_found",
                 },
             )
@@ -98,7 +98,7 @@ async def retrieve_asset_node(state: AgentState) -> dict:
                 await adispatch_custom_event(
                     "html_block",
                     {
-                        "html": '<div class="not-found-card"><p>The asset database is temporarily unavailable. Please try again shortly.</p></div>',
+                        "html": '<div class="not-found-card">The asset database is temporarily unavailable. Please try again shortly.</div>',
                         "card_type": "error",
                     },
                 )
@@ -106,6 +106,7 @@ async def retrieve_asset_node(state: AgentState) -> dict:
             logger.error(
                 "retrieve_asset_failed",
                 extra={"error": str(exc), "intent": intent},
+                exc_info=True,
             )
             raise
 

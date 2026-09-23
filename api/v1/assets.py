@@ -18,11 +18,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from core.auth import UserContext
-from core.db.session import AsyncSessionLocal
-from core.db.models import MarketingCollateralAsset
 from core.errors import NotFoundError
 from modules.phase1a.asset_registry import asset_registry, _ASSET_TYPE_FOLDERS, _normalise
-from sqlalchemy import select, func
+from modules.phase1a.collateral_store import collateral_store
 
 logger = logging.getLogger(__name__)
 
@@ -111,18 +109,7 @@ async def download_folder_zip(
     """Stream a ZIP of all active assets in a project folder."""
     normalised = _normalise(project_name)
 
-    async with AsyncSessionLocal() as session:
-        stmt = (
-            select(MarketingCollateralAsset)
-            .where(
-                func.lower(MarketingCollateralAsset.project_title) == normalised,
-                MarketingCollateralAsset.folder_key == folder_key,
-                MarketingCollateralAsset.is_active.is_(True),
-            )
-            .order_by(MarketingCollateralAsset.file_name)
-        )
-        result = await session.execute(stmt)
-        rows = result.scalars().all()
+    rows = sorted(collateral_store.assets(normalised, folder_key), key=lambda a: a.file_name)
 
     if not rows:
         raise NotFoundError(f"No assets found for project '{project_name}', folder '{folder_key}'.")

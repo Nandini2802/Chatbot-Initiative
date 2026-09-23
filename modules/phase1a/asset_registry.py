@@ -1,4 +1,4 @@
-"""
+﻿"""
 Asset registry — backed by Postgres (marketing_collateral_assets table).
 
 Data is populated by: scripts/sync_marketing_collateral.py

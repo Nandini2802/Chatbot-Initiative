@@ -1,5 +1,6 @@
-.env.local
 .env
+.env.example
+.env.local
 local_storage/
 __pycache__/
 *.pyc

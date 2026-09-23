@@ -42,8 +42,6 @@ async def _stream_events(
 ) -> AsyncGenerator[str, None]:
     start_ms = time.monotonic() * 1000
 
-    print("start_ms", start_ms)
-
     graph = await get_graph()
     config = {"configurable": {"thread_id": session_id}}
 
@@ -59,7 +57,6 @@ async def _stream_events(
         "entities": None,
         "confidence": None,
         "path": None,
-        "clarification": None,
         "card_html": None,
         "card_type": None,
         "commentary": None,
@@ -69,6 +66,9 @@ async def _stream_events(
     }
 
     run_id: str | None = None
+
+    pending_html_block = None
+    pending_followups = None
 
     try:
         async for event in graph.astream_events(
@@ -100,9 +100,13 @@ async def _stream_events(
                 data = event["data"]
 
                 if name == "html_block":
-                    yield html_block(data["html"], data["card_type"])
+                    pending_html_block = {
+                        "html": data["html"],
+                        "card_type": data["card_type"],
+                    }
+
                 elif name == "followups":
-                    yield followups(data["chips"])
+                    pending_followups = data["chips"]
 
             elif kind == "on_chain_error":
                 logger.error(
@@ -114,10 +118,19 @@ async def _stream_events(
                 )
                 yield error("Something went wrong. Please try again.", "AGENT_ERROR")
 
+        if pending_html_block:
+            yield html_block(
+                pending_html_block["html"],
+                pending_html_block["card_type"],
+            )
+
+        if pending_followups:
+            yield followups(pending_followups)
     except Exception as exc:
         logger.error(
             "stream_unhandled_error",
             extra={"session_id": session_id, "error": str(exc)},
+            exc_info=True,
         )
         yield error("An unexpected error occurred. Please try again.", "INTERNAL_ERROR")
 
@@ -133,8 +146,6 @@ async def chat_query(
     request: Request,
     user: UserContext = Depends(_get_user),
 ) -> StreamingResponse:
-    print("body", body)
-    print("user", user)
     logger.info(
         "chat_query_received",
         extra={

@@ -2,7 +2,7 @@
 SSE event builders — all SSE output goes through these functions.
 Never construct raw SSE strings in endpoint or agent code.
 
-Stream order: html_block → token(s) → followups → done
+Stream order: token(s) → html_block → followups → done
 """
 from __future__ import annotations
 
