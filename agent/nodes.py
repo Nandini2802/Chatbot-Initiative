@@ -25,6 +25,7 @@ from core.prompts import get_prompt
 from core.errors import LLMError
 from core.llm import chat_model
 from core.observability import record_clarification
+from core.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -94,38 +95,190 @@ async def intent_node(state: AgentState) -> dict:
 
     # ── Follow-up turn: active clarification in progress ─────────────────
     if clarification and not clarification_is_complete(clarification):
+
+        current_intent = clarification["intent"]
+        missing_param = clarification_next_missing(clarification)
+
         try:
-            _intent, entities, _conf = await _classify(
-                query, state.get("session_history", [])
+            new_intent, entities, new_confidence = await _classify(
+                query,
+                state.get("session_history", []),
             )
         except LLMError:
-            # Treat the whole query as the value for the next missing param
-            missing = clarification_next_missing(clarification)
-            entities = {missing: query.strip()} if missing else {}
-
-        updated_cs = clarification
-        for param in clarification.get("missing", []):
-            if param in entities and entities[param]:
-                updated_cs = clarification_collect(updated_cs, param, entities[param])
-
-        if clarification_is_complete(updated_cs):
-            logger.info(
-                "clarification_complete",
-                extra={"intent": updated_cs["intent"], "session_id": state.get("session_id")},
+            logger.error(
+                "clarification_classification_failed",
+                extra={
+                    "query": query[:100],
+                    "session_id": state.get("session_id"),
+                },
             )
+
+            return {
+                "clarification": clarification,
+                "path": "clarify",
+            }
+
+        # ────────────────────────────────────────────────────────────────
+        # CASE 1:
+        # User supplied the entity we are currently waiting for.
+        #
+        # This MUST be checked BEFORE intent switching.
+        #
+        # Example:
+        #
+        # current intent = get_brochure
+        # missing        = project_name
+        # user           = "greenz"
+        #
+        # classifier may return:
+        #   new_intent = get_project_overview
+        #   entities = {"project_name": "Greenz"}
+        #
+        # We DO NOT care about new_intent here.
+        # The user answered our clarification question.
+        # ────────────────────────────────────────────────────────────────
+
+        if missing_param and entities.get(missing_param):
+
+            updated_cs = clarification_collect(
+                clarification,
+                missing_param,
+                entities[missing_param],
+            )
+
+            if clarification_is_complete(updated_cs):
+
+                logger.info(
+                    "clarification_complete",
+                    extra={
+                        "intent": updated_cs["intent"],
+                        "entities": updated_cs.get("collected", {}),
+                        "session_id": state.get("session_id"),
+                    },
+                )
+
+                return {
+                    "clarification": updated_cs,
+                    "intent": updated_cs["intent"],
+                    "entities": updated_cs.get("collected", {}),
+                    "confidence": 1.0,
+                    "path": updated_cs["intent"],
+                }
+
             return {
                 "clarification": updated_cs,
                 "intent": updated_cs["intent"],
                 "entities": updated_cs.get("collected", {}),
-                "confidence": 1.0,
-                "path": updated_cs["intent"],
+                "path": "clarify",
             }
+
+        # ────────────────────────────────────────────────────────────────
+        # CASE 2:
+        # User did NOT provide the missing entity.
+        #
+        # Now check whether they changed their request.
+        #
+        # Example:
+        #
+        # current intent = get_floor_plan
+        # missing        = project_name
+        # user           = "brochure instead"
+        #
+        # classifier:
+        #   new_intent = get_brochure
+        #   project_name = None
+        #
+        # Therefore replace the old clarification.
+        # ────────────────────────────────────────────────────────────────
+
+        if (
+            new_intent
+            and new_intent != current_intent
+            and new_intent != "out_of_scope"
+        ):
+
+            required = _REQUIRED_PARAMS.get(new_intent, [])
+
+            collected = {
+                param: entities[param]
+                for param in required
+                if entities.get(param)
+            }
+
+            missing = [
+                param
+                for param in required
+                if not collected.get(param)
+            ]
+
+            logger.info(
+                "clarification_intent_switched",
+                extra={
+                    "old_intent": current_intent,
+                    "new_intent": new_intent,
+                    "entities": entities,
+                    "missing": missing,
+                    "session_id": state.get("session_id"),
+                },
+            )
+
+            # New request already contains everything required.
+            #
+            # Example:
+            # "give me Greenz brochure instead"
+            if not missing:
+                return {
+                    "intent": new_intent,
+                    "entities": collected,
+                    "confidence": new_confidence,
+                    "clarification": None,
+                    "path": new_intent,
+                }
+
+            # New request still needs clarification.
+            #
+            # Example:
+            # "brochure instead"
+            #
+            # get_brochure still needs project_name.
+            new_clarification = clarification_state_factory(
+                intent=new_intent,
+                required_params=required,
+                collected=collected,
+            )
+
+            return {
+                "intent": new_intent,
+                "entities": collected,
+                "confidence": new_confidence,
+                "clarification": new_clarification,
+                "path": "clarify",
+            }
+
+        # ────────────────────────────────────────────────────────────────
+        # CASE 3:
+        # Neither:
+        #   - missing entity was supplied
+        #   - nor intent was changed
+        #
+        # Keep the current clarification active.
+        # ────────────────────────────────────────────────────────────────
 
         logger.info(
             "clarification_still_incomplete",
-            extra={"intent": updated_cs["intent"], "missing": updated_cs.get("missing", [])},
+            extra={
+                "intent": clarification["intent"],
+                "missing": clarification.get("missing", []),
+                "session_id": state.get("session_id"),
+            },
         )
-        return {"clarification": updated_cs, "path": "clarify"}
+
+        return {
+            "clarification": clarification,
+            "intent": clarification["intent"],
+            "entities": clarification.get("collected", {}),
+            "path": "clarify",
+        }
 
     # ── Fresh query — run full intent classification ───────────────────────
     try:
