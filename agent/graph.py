@@ -15,7 +15,7 @@ from typing import Any
 
 from langgraph.graph import END, StateGraph
 
-from agent.nodes import clarify_node, followups_node, intent_node, inventory_query_node
+from agent.nodes import clarify_node, followups_node, intent_node, inventory_query_node, out_of_scope_node
 from agent.state import AgentState, clarification_is_complete
 from agent.tools import check_version_node, retrieve_asset_node, retrieve_knowledge_node
 from core.settings import settings
@@ -34,7 +34,12 @@ _ASSET_INTENTS = {
 }
 _VERSION_INTENTS = {"check_version", "list_languages"}
 _KNOWLEDGE_INTENTS = {"knowledge_query"}
-_INVENTORY_INTENTS = {"inventory_availability"}
+_INVENTORY_INTENTS = {
+    "inventory_availability",  # temporary backward compatibility
+    "inventory_project",
+    "inventory_units",
+    "inventory_combined",
+}
 
 # Fast-path eligible intents (high-confidence, single-asset, no ambiguity)
 FAST_PATH_INTENTS = {
@@ -62,7 +67,9 @@ def _intent_to_node(intent: str) -> str:
         return "check_version"
     if intent in _INVENTORY_INTENTS:
         return "inventory_query"
-    return "retrieve_knowledge"
+    if intent in _KNOWLEDGE_INTENTS:
+        return "retrieve_knowledge"
+    return "out_of_scope"
 
 
 def route_after_intent(state: AgentState) -> str:
@@ -76,7 +83,7 @@ def route_after_intent(state: AgentState) -> str:
     entities = state.get("entities") or {}
 
     if not intent or intent == "out_of_scope":
-        return "retrieve_knowledge"
+        return "out_of_scope"
 
     required = _REQUIRED_ENTITIES.get(intent, [])
     missing = [p for p in required if not entities.get(p)]
@@ -125,6 +132,7 @@ def build_graph(checkpointer) -> Any:
     g.add_node("retrieve_knowledge", retrieve_knowledge_node)
     g.add_node("check_version", check_version_node)
     g.add_node("inventory_query", inventory_query_node)
+    g.add_node("out_of_scope", out_of_scope_node)
     g.add_node("followups", followups_node)
 
     # ── Entry point ────────────────────────────────────────────────────────
@@ -140,6 +148,7 @@ def build_graph(checkpointer) -> Any:
             "retrieve_knowledge": "retrieve_knowledge",
             "check_version": "check_version",
             "inventory_query": "inventory_query",
+            "out_of_scope": "out_of_scope",
         },
     )
 
@@ -161,6 +170,8 @@ def build_graph(checkpointer) -> Any:
     g.add_edge("retrieve_knowledge", "followups")
     g.add_edge("check_version", "followups")
     g.add_edge("inventory_query", "followups")
+    g.add_edge("out_of_scope", END)
+
     g.add_edge("followups", END)
 
     return g.compile(checkpointer=checkpointer)

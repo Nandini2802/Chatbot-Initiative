@@ -56,7 +56,9 @@ def _fuzzy_score(a: str, b: str) -> float:
 async def resolve_project_name(
     name: str,
     cache: Optional[ProjectCache] = None,
+    source: str = "all",
 ) -> ResolveResult:
+
     """
     Resolve a raw user-supplied project name to a ProjectRecord.
 
@@ -70,12 +72,44 @@ async def resolve_project_name(
     if cache is None:
         cache = get_project_cache()
 
-    projects = await cache.get_all()
+    if source == "active":
+        projects = await cache.get_active_projects()
+    elif source == "units":
+        projects = await cache.get_unit_projects()
+    elif source == "all":
+        projects = await cache.get_all()
+    else:
+        raise ValueError(
+            f"Unsupported project resolution source: {source}"
+        )
     if not projects:
         logger.warning("resolve_project_name: project cache is empty")
         return ResolveResult(status=ResolveStatus.NOT_FOUND, candidates=[])
 
     query = name.strip().lower()
+
+    # ── 1. Exact match (highest priority) ────────────────────────────────
+    exact_hits = [
+        p for p in projects
+        if p.project_name.strip().casefold() == query
+    ]
+
+    if len(exact_hits) == 1:
+        p = exact_hits[0]
+
+        return ResolveResult(
+            status=ResolveStatus.RESOLVED,
+            project_id=p.project_id,
+            project_name=p.project_name,
+            candidates=[p],
+        )
+
+    if len(exact_hits) > 1:
+        return ResolveResult(
+            status=ResolveStatus.AMBIGUOUS,
+            candidates=exact_hits,
+        )
+
 
     # ── 1. Substring match ────────────────────────────────────────────────
     substring_hits = [

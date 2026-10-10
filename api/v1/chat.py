@@ -99,11 +99,20 @@ async def _stream_events(
                 name = event["name"]
                 data = event["data"]
 
-                if name == "html_block":
+                if name == "text_response":
+                    yield token(data["text"])
+
+                elif name == "html_block":
                     pending_html_block = {
                         "html": data["html"],
                         "card_type": data["card_type"],
                     }
+
+                elif name == "inventory_commentary":
+                    commentary = data.get("commentary", "")
+
+                    if commentary:
+                        yield token(commentary)
 
                 elif name == "followups":
                     pending_followups = data["chips"]

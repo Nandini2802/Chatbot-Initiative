@@ -26,6 +26,8 @@ from core.errors import LLMError
 from core.llm import chat_model
 from core.observability import record_clarification
 from core.settings import settings
+from core.project_names import normalize_project_name
+from core.llm import chat_model_long, stream_text_chunks
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +45,13 @@ _REQUIRED_PARAMS: dict[str, list[str]] = {
     "get_spec_sheet":        ["project_name", "unit_type"],
     "get_project_overview":  ["project_name"],
     "knowledge_query":       [],  # project_name optional — cross-project queries are valid
-    "inventory_availability": [],  # all entities optional — bare 'what's available' is valid
+    # Legacy intent - keep temporarily for compatibility
+    "inventory_availability": [],
+
+    # New selective inventory intents
+    "inventory_project": ["project_name"],
+    "inventory_units": [],
+    "inventory_combined": ["project_name"],
 }
 
 
@@ -70,9 +78,19 @@ async def _classify(query: str, history: list[dict]) -> tuple[str, dict, float]:
 
     try:
         parsed = json.loads(raw)
+        entities = parsed.get("entities", {})
+
+        if entities.get("project_name"):
+            normalized_project = normalize_project_name(
+                entities["project_name"]
+            )
+
+            if normalized_project:
+                entities["project_name"] = normalized_project
+
         return (
             parsed.get("intent", "out_of_scope"),
-            parsed.get("entities", {}),
+            entities,
             float(parsed.get("confidence", 0.5)),
         )
     except (json.JSONDecodeError, ValueError) as exc:
@@ -148,6 +166,13 @@ async def intent_node(state: AgentState) -> dict:
 
             if clarification_is_complete(updated_cs):
 
+                collected_entities = updated_cs.get("collected", {})
+                previous_context = state.get("conversation_context") or {}
+                new_context = dict(previous_context)
+
+                if collected_entities.get("project_name"):
+                    new_context["project_name"] = collected_entities["project_name"]
+
                 logger.info(
                     "clarification_complete",
                     extra={
@@ -158,11 +183,12 @@ async def intent_node(state: AgentState) -> dict:
                 )
 
                 return {
-                    "clarification": updated_cs,
-                    "intent": updated_cs["intent"],
-                    "entities": updated_cs.get("collected", {}),
-                    "confidence": 1.0,
-                    "path": updated_cs["intent"],
+                "clarification": updated_cs,
+                "intent": updated_cs["intent"],
+                "entities": collected_entities,
+                "confidence": 1.0,
+                "path": updated_cs["intent"],
+                "conversation_context": new_context                
                 }
 
             return {
@@ -170,6 +196,24 @@ async def intent_node(state: AgentState) -> dict:
                 "intent": updated_cs["intent"],
                 "entities": updated_cs.get("collected", {}),
                 "path": "clarify",
+            }
+
+        if new_intent == "out_of_scope":
+            logger.info(
+                "clarification_switched_to_out_of_scope",
+                extra={
+                    "old_intent": current_intent,
+                    "query": query[:100],
+                    "session_id": state.get("session_id"),
+                },
+            )
+
+            return {
+                "intent": "out_of_scope",
+                "entities": {},
+                "confidence": new_confidence,
+                "clarification": None,
+                "path": "out_of_scope",
             }
 
         # ────────────────────────────────────────────────────────────────
@@ -200,9 +244,9 @@ async def intent_node(state: AgentState) -> dict:
             required = _REQUIRED_PARAMS.get(new_intent, [])
 
             collected = {
-                param: entities[param]
-                for param in required
-                if entities.get(param)
+                key: value
+                for key, value in entities.items()
+                if value is not None and value != ""
             }
 
             missing = [
@@ -227,12 +271,19 @@ async def intent_node(state: AgentState) -> dict:
             # Example:
             # "give me Greenz brochure instead"
             if not missing:
+                previous_context = state.get("conversation_context") or {}
+                new_context = dict(previous_context)
+
+                if collected.get("project_name"):
+                    new_context["project_name"] = collected["project_name"]
+
                 return {
                     "intent": new_intent,
                     "entities": collected,
                     "confidence": new_confidence,
                     "clarification": None,
                     "path": new_intent,
+                    "conversation_context": new_context,
                 }
 
             # New request still needs clarification.
@@ -290,11 +341,42 @@ async def intent_node(state: AgentState) -> dict:
         return {"intent": "out_of_scope", "entities": {}, "confidence": 0.0}
 
     previous_context = state.get("conversation_context") or {}
+    entities = dict(entities or {})
+
     extracted_project = entities.get("project_name")
     previous_project = previous_context.get("project_name")
 
-    if not extracted_project and previous_project:
+    query_lower = query.strip().lower()
+
+    global_inventory_phrases = (
+        "all projects",
+        "across all projects",
+        "every project",
+        "all danube projects",
+        "entire portfolio",
+        "across projects",
+    )
+
+    is_global_inventory = (
+        intent in {"inventory_units", "inventory_availability"}
+        and any(
+            phrase in query_lower
+            for phrase in global_inventory_phrases
+        )
+    )
+
+    # Retain previous project for related follow-up queries,
+    # but not for explicitly global inventory requests.
+    if (
+        not extracted_project
+        and previous_project
+        and not is_global_inventory
+        and intent not in {"out_of_scope"}
+    ):
         entities["project_name"] = previous_project
+
+    if is_global_inventory:
+        entities["project_name"] = None
 
     new_context = dict(previous_context)
 
@@ -336,6 +418,44 @@ async def intent_node(state: AgentState) -> dict:
         "conversation_context": new_context,
     }
 
+# ── Out-of-scope node ────────────────────────────────────────────────────────
+
+async def out_of_scope_node(state: AgentState) -> dict:
+    """
+    Handle requests outside the supported Danube Properties chatbot scope.
+
+    This response is deterministic and intentionally does not call the LLM,
+    retrieval layer, or external tools.
+    """
+
+    commentary = (
+        "I can only assist with Danube Properties-related information, "
+        "including projects, inventory, marketing materials, and "
+        "Danube platform guidance."
+    )
+
+    await adispatch_custom_event(
+        "text_response",
+        {"text": commentary},
+    )
+
+
+    logger.info(
+        "out_of_scope_query",
+        extra={
+            "query": state.get("query", "")[:100],
+            "session_id": state.get("session_id"),
+        },
+    )
+
+
+    return {
+        "card_html": "",
+        "card_type": "out_of_scope",
+        "commentary": commentary,
+        "clarification": None,
+        "path": "out_of_scope",
+    }
 
 # ── Clarification node ────────────────────────────────────────────────────────
 
@@ -388,6 +508,22 @@ async def clarify_node(state: AgentState) -> dict:
 
     record_clarification(intent=intent, tenant_id=state.get("tenant_id", "unknown"))
 
+    if (
+        clarification.get("clarification_type")
+        == "inventory_project"
+    ):
+        candidates = clarification.get(
+            "candidate_projects", []
+        )
+
+        # The inventory node has already prepared the
+        # clarification commentary.
+        # Avoid generating a generic marketing clarification card.
+        return {
+            "clarification": clarification,
+            "path": "await_user",
+        }
+
     card_type = f"clarification_{missing_param}"
     html = _build_clarification_html(missing_param, project_name)
 
@@ -414,86 +550,193 @@ async def clarify_node(state: AgentState) -> dict:
 # ── Inventory query node ───────────────────────────────────────────────────────
 # Handles: inventory_availability
 
+
 async def inventory_query_node(state: AgentState) -> dict:
     """
-    Live inventory availability query against Salesforce.
+    Handle Salesforce inventory queries.
 
-    Returns plain streamed text — no HTML card. The LLM formats the full
-    answer from the raw unit data so the output feels like a natural
-    conversation rather than a data dump.
+    Supports:
+    - inventory_project: project-level details
+    - inventory_units: unit-level details
+    - inventory_combined: project and unit details
+
+    Uses the existing commentary streaming mechanism.
     """
-    from modules.inventory.service import ResultKind, answer_inventory_query
+    from modules.inventory.service import (
+        ResultKind,
+        answer_inventory_query,
+    )
 
     entities = state.get("entities") or {}
     query = state.get("query", "")
+    inventory_intent = state.get(
+        "intent", "inventory_units"
+    )
 
-    result = await answer_inventory_query(entities)
+    # Service decides which Salesforce API(s) to call.
+    result = await answer_inventory_query(
+        entities=entities,
+        inventory_intent=inventory_intent,
+    )
 
-    # ── Project not found ─────────────────────────────────────────────────
+    # -------------------------------------------
+    # Project not found
+    # -------------------------------------------
     if result.kind == ResultKind.PROJECT_NOT_FOUND:
         commentary = (
             f"I couldn't find a Danube project matching "
             f"**{result.raw_query_project}**. "
-            f"Could you check the spelling or let me know which project you meant?"
+            f"Could you check the spelling or let me know "
+            f"which project you meant?"
         )
-        return {"card_html": "", "card_type": "inventory", "commentary": commentary}
 
-    # ── Ambiguous project name ────────────────────────────────────────────
+        return {
+            "card_html": "",
+            "card_type": "inventory",
+            "commentary": commentary,
+        }
+
+    # -------------------------------------------
+    # Ambiguous project name
+    # -------------------------------------------
     if result.kind == ResultKind.AMBIGUOUS_PROJECT:
-        names = ", ".join(f"**{c}**" for c in result.candidates)
-        commentary = (
-            f"I found a few projects that could match **{result.raw_query_project}**: "
-            f"{names}. Which one did you mean?"
-        )
-        return {"card_html": "", "card_type": "inventory", "commentary": commentary}
+        candidates = result.candidates or []
 
-    # ── Salesforce error ──────────────────────────────────────────────────
+        names = ", ".join(
+            f"**{name}**"
+            for name in candidates
+        )
+
+        commentary = (
+            f"I found multiple Salesforce projects matching "
+            f"**{result.raw_query_project}**: "
+            f"{names}. Which project would you like details for?"
+        )
+
+        clarification = {
+            "intent": inventory_intent,
+            "collected": {
+                "project_name": result.raw_query_project,
+            },
+            "missing": ["project_name"],
+            "candidate_projects": candidates,
+            "clarification_type": "inventory_project",
+        }
+
+
+        await adispatch_custom_event(
+            "inventory_commentary",
+            {
+                "commentary": commentary,
+            },
+        )
+
+
+
+        return {
+            "card_html": "",
+            "card_type": "inventory",
+            "commentary": commentary,
+            "clarification": clarification,
+            "path": "await_user",
+        }
+
+
+    # -------------------------------------------
+    # Salesforce API error
+    # -------------------------------------------
     if result.kind == ResultKind.SF_ERROR:
         commentary = (
-            "I wasn't able to retrieve live inventory right now. "
+            "I wasn't able to retrieve live inventory "
+            "information right now. "
             "Please try again in a moment."
         )
+
         logger.warning(
             "inventory_sf_error_surfaced",
-            extra={"error": result.error_message, "session_id": state.get("session_id")},
+            extra={
+                "error": result.error_message,
+                "session_id": state.get("session_id"),
+            },
         )
-        return {"card_html": "", "card_type": "inventory", "commentary": commentary}
 
-    # ── Normal units result — stream LLM-formatted text ───────────────────
-    units = result.units
-    project_label = result.project_name or ("all projects" if result.is_global else "")
+        return {
+            "card_html": "",
+            "card_type": "inventory",
+            "commentary": commentary,
+        }
+
+    # -------------------------------------------
+    # Successful Salesforce response
+    # -------------------------------------------
+    project_label = (
+        result.project_name
+        or ("all projects" if result.is_global else "")
+    )
+
     filters = result.filters_applied
-    unit_summary = _units_to_context(units, result.is_global)
     filter_desc = _filters_to_text(filters)
 
-    system_prompt = get_prompt("commentary_inventory")
-    human_content = (
-        f"Project searched: {project_label or 'All (global)'}\n"
-        f"Filters applied: {filter_desc or 'None'}\n"
-        f"Available units found: {len(units)}\n\n"
-        f"Unit data:\n{unit_summary}\n\n"
-        f"Broker query: {query}"
+    # Build context according to the actual
+    # Salesforce result type.
+    inventory_context = _inventory_result_context(
+        result
     )
+
+    system_prompt = get_prompt(
+        "commentary_inventory"
+    )
+
+    human_content = (
+        f"Inventory intent: {inventory_intent}\n"
+        f"Result type: {result.kind.value}\n"
+        f"Project searched: "
+        f"{project_label or 'All projects'}\n"
+        f"Filters applied: "
+        f"{filter_desc or 'None'}\n\n"
+        f"Salesforce data:\n"
+        f"{inventory_context}\n\n"
+        f"Broker query: {query}\n\n"
+        "Answer using only the supplied Salesforce data. "
+        "Do not invent missing values."
+    )
+
     messages = [
         SystemMessage(content=system_prompt),
         HumanMessage(content=human_content),
     ]
 
     commentary_chunks: list[str] = []
+
     try:
-        async for text in stream_text_chunks(chat_model_long.astream(messages)):
-            commentary_chunks.append(text)
+        async for chunk in stream_text_chunks(
+            chat_model_long.astream(messages)
+        ):
+            commentary_chunks.append(chunk)
+
     except Exception as exc:
-        logger.warning(
-            "inventory_commentary_failed",
-            extra={"error": str(exc), "session_id": state.get("session_id")},
+        logger.exception(
+            "inventory_commentary_failed: %s",
+            str(exc),
         )
+        raise
+
     commentary = "".join(commentary_chunks)
+
+    # Fallback if commentary generation fails.
+    if not commentary.strip():
+        commentary = (
+            "I retrieved the inventory information, "
+            "but couldn't format the response right now. "
+            "Please try again."
+        )
 
     logger.info(
         "inventory_query_complete",
         extra={
-            "unit_count": len(units),
+            "intent": inventory_intent,
+            "result_kind": result.kind.value,
+            "unit_count": len(result.units),
             "project": project_label,
             "is_global": result.is_global,
             "filters": filters,
@@ -501,7 +744,74 @@ async def inventory_query_node(state: AgentState) -> dict:
         },
     )
 
-    return {"card_html": "", "card_type": "inventory", "commentary": commentary}
+    return {
+        "card_html": "",
+        "card_type": "inventory",
+        "commentary": commentary,
+    }
+
+
+def _inventory_result_context(result) -> str:
+    """
+    Convert Salesforce inventory results into
+    readable context for the commentary LLM.
+
+    Handles project-only, units-only, and
+    combined responses.
+    """
+    from dataclasses import asdict
+    from modules.inventory.service import ResultKind
+
+    sections = []
+
+    # -------------------------------------------
+    # Project-level information
+    # -------------------------------------------
+    if result.kind in {
+        ResultKind.PROJECT,
+        ResultKind.COMBINED,
+    }:
+        if result.project is not None:
+            project_data = asdict(result.project)
+
+            # Exclude raw/unmapped Salesforce fields
+            # to avoid sending unnecessary data.
+            project_data.pop("extra", None)
+
+            project_lines = [
+                f"{key}: {value}"
+                for key, value in project_data.items()
+                if value is not None
+                and value != ""
+            ]
+
+            sections.append(
+                "PROJECT DETAILS:\n"
+                + "\n".join(project_lines)
+            )
+
+    # -------------------------------------------
+    # Unit-level information
+    # -------------------------------------------
+    if result.kind in {
+        ResultKind.UNITS,
+        ResultKind.COMBINED,
+    }:
+        units = result.units
+
+        sections.append(
+            f"AVAILABLE UNITS FOUND: {len(units)}"
+        )
+
+        sections.append(
+            "UNIT DETAILS:\n"
+            + _units_to_context(
+                units,
+                result.is_global,
+            )
+        )
+
+    return "\n\n".join(sections)
 
 
 def _build_inventory_card(
@@ -602,10 +912,20 @@ def _units_to_context(units: list, is_global: bool) -> str:
 
     # Project-specific query — always list every unit individually
     return "\n".join(
-        f"  {u.unit_code or u.unit_id} | {u.unit_type or '?'} | "
-        f"{u.bedrooms if u.bedrooms is not None else '?'}BR | "
-        f"{'AED {:,.0f}'.format(u.price) if u.price is not None else 'Price TBC'} | "
-        f"Floor {u.floor or '?'} | View: {u.view or '—'}"
+        (
+            f"Unit: {u.unit_code or u.unit_id} | "
+            f"Project: {u.project_name or 'Unknown'} | "
+            f"Building: {u.building_name or 'Not available'} | "
+            f"Type: {u.unit_type or 'Not available'} | "
+            f"Bedrooms: "
+            f"{u.bedrooms if u.bedrooms is not None else 'Not available'} | "
+            f"Price: "
+            f"{'AED {:,.0f}'.format(u.price) if u.price is not None else 'Not available'} | "
+            f"Floor: "
+            f"{u.floor if u.floor is not None else 'Not available'} | "
+            f"View: {u.view or 'Not available'} | "
+            f"Status: {u.status or 'Not available'}"
+        )
         for u in units
     )
 

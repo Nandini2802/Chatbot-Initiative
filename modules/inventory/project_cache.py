@@ -1,105 +1,213 @@
-"""
-In-memory project directory cache with TTL.
 
-Builds the project directory from GetAllUnitsVisibleToBroker by extracting
-unique projectId/projectName pairs. This guarantees the projectIds and
-projectNames here are the same format as what appears in unit records —
-avoiding the mismatch that occurs when using getActiveProjects IDs with
-getUnitsByProject.
-
-Only this module calls GetAllUnitsVisibleToBroker for directory purposes.
-All other code goes through get_project_cache().
 """
+TTL-cached project directory for Salesforce inventory.
+
+Maintains:
+1. Active project records from getActiveProjects.
+2. Unit project records from GetAllUnitsVisibleToBroker.
+
+Project IDs from the two endpoints are kept separate.
+"""
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+
 from dataclasses import dataclass
 from typing import Optional
 
 from core.settings import settings
+from modules.inventory.models import Project, normalize_project
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class ProjectRecord:
-    """Minimal project shape needed for name resolution."""
-    project_id: str       # projectId as it appears in unit records
-    project_name: str     # projectName as it appears in unit records
+    project_id: str
+    project_name: str
+    project: Optional[Project] = None
+    unit_api_project_id: Optional[str] = None
 
 
-def _extract_projects(raw_units: list[dict]) -> list[ProjectRecord]:
-    """
-    Derive unique ProjectRecord entries from a flat all-units response.
-    Uses (projectId, projectName) from each unit record, deduped by project_id.
-    """
+def _normalize_name(name: str) -> str:
+    return " ".join(name.casefold().split())
+
+
+def _extract_unit_projects(
+    raw_units: list[dict],
+) -> list[ProjectRecord]:
     seen: dict[str, ProjectRecord] = {}
-    for u in raw_units:
-        pid = u.get("projectId") or u.get("Project__c")
-        name = u.get("projectName") or u.get("Project_Name__c")
-        if pid and name and str(pid) not in seen:
-            seen[str(pid)] = ProjectRecord(
-                project_id=str(pid),
-                project_name=str(name),
+
+    for raw in raw_units:
+        project_id = raw.get("projectId") or raw.get("Project__c")
+        project_name = (
+            raw.get("projectName") or raw.get("Project_Name__c")
+        )
+
+        if not project_id or not project_name:
+            continue
+
+        key = _normalize_name(str(project_name))
+
+        if key not in seen:
+            seen[key] = ProjectRecord(
+                project_id=str(project_id),
+                project_name=str(project_name),
             )
+
     return list(seen.values())
 
 
+def _extract_active_projects(
+    raw_projects: list[dict],
+) -> list[ProjectRecord]:
+    records = []
+
+    for raw in raw_projects:
+        project = normalize_project(raw)
+
+        if not project.project_name:
+            continue
+
+        records.append(
+            ProjectRecord(
+                project_id=project.project_id,
+                project_name=project.project_name,
+                project=project,
+            )
+        )
+
+    return records
+
+
 class ProjectCache:
-    """
-    Lazy, TTL-based in-memory cache for the project directory.
+    def __init__(
+        self,
+        ttl_seconds: Optional[int] = None,
+    ) -> None:
+        self._ttl = (
+            ttl_seconds
+            if ttl_seconds is not None
+            else settings.sf_project_cache_ttl_seconds
+        )
 
-    Single instance used as a module-level singleton (see get_project_cache()).
-    """
+        self._active_projects: list[ProjectRecord] = []
+        self._unit_projects: list[ProjectRecord] = []
 
-    def __init__(self, ttl_seconds: Optional[int] = None) -> None:
-        self._ttl = ttl_seconds or settings.sf_project_cache_ttl_seconds
-        self._projects: list[ProjectRecord] = []
-        self._fetched_at: float = 0.0
+        self._active_fetched_at = 0.0
+        self._units_fetched_at = 0.0
+
+        self._active_loaded = False
+        self._units_loaded = False
+
         self._lock = asyncio.Lock()
 
-    def _is_fresh(self) -> bool:
-        return bool(self._projects) and (time.monotonic() - self._fetched_at) < self._ttl
+    def _is_fresh(self, fetched_at: float, loaded: bool) -> bool:
+        return (
+            loaded
+            and time.monotonic() - fetched_at < self._ttl
+        )
 
-    async def get_all(self) -> list[ProjectRecord]:
-        """Return cached project list, refreshing if TTL has expired."""
-        if self._is_fresh():
-            return self._projects
+    async def get_active_projects(self) -> list[ProjectRecord]:
+        if self._is_fresh(
+            self._active_fetched_at, self._active_loaded
+        ):
+            return list(self._active_projects)
 
         async with self._lock:
-            # Double-check inside lock to avoid thundering herd on expiry
-            if self._is_fresh():
-                return self._projects
+            if self._is_fresh(
+                self._active_fetched_at, self._active_loaded
+            ):
+                return list(self._active_projects)
 
             from modules.inventory.client import AsyncSalesforceClient
 
-            logger.info("sf_project_cache_refresh")
             async with AsyncSalesforceClient() as client:
-                raw_units = await client.get_all_units()
+                raw = await client.get_active_projects()
 
-            projects = _extract_projects(raw_units)
+            records = _extract_active_projects(raw)
 
-            self._projects = projects
-            self._fetched_at = time.monotonic()
+            self._active_projects = records
+            self._active_fetched_at = time.monotonic()
+            self._active_loaded = True
+
             logger.info(
-                "sf_project_cache_refreshed",
-                extra={"count": len(projects)},
+                "sf_active_project_cache_refreshed",
+                extra={"count": len(records)},
             )
-            return self._projects
+
+            return list(records)
+
+    async def get_unit_projects(self) -> list[ProjectRecord]:
+        if self._is_fresh(
+            self._units_fetched_at, self._units_loaded
+        ):
+            return list(self._unit_projects)
+
+        async with self._lock:
+            if self._is_fresh(
+                self._units_fetched_at, self._units_loaded
+            ):
+                return list(self._unit_projects)
+
+            from modules.inventory.client import AsyncSalesforceClient
+
+            async with AsyncSalesforceClient() as client:
+                raw = await client.get_all_units()
+
+            records = _extract_unit_projects(raw)
+
+            self._unit_projects = records
+            self._units_fetched_at = time.monotonic()
+            self._units_loaded = True
+
+            logger.info(
+                "sf_unit_project_cache_refreshed",
+                extra={"count": len(records)},
+            )
+
+            return list(records)
+
+    async def get_all(self) -> list[ProjectRecord]:
+        """
+        Backward-compatible directory for name resolution.
+
+        Active projects are primary. Unit-only projects are
+        included so existing inventory queries still work.
+        """
+        active = await self.get_active_projects()
+        unit_projects = await self.get_unit_projects()
+
+        merged: dict[str, ProjectRecord] = {}
+
+        for record in active:
+            merged[_normalize_name(record.project_name)] = record
+
+        for record in unit_projects:
+            key = _normalize_name(record.project_name)
+
+            if key not in merged:
+                merged[key] = record
+
+        return list(merged.values())
 
     def invalidate(self) -> None:
-        """Force a refresh on the next call (useful for tests)."""
-        self._fetched_at = 0.0
+        self._active_fetched_at = 0.0
+        self._units_fetched_at = 0.0
+        self._active_loaded = False
+        self._units_loaded = False
 
 
-# Module-level singleton — one cache per process lifetime
 _cache: Optional[ProjectCache] = None
 
 
 def get_project_cache() -> ProjectCache:
     global _cache
+
     if _cache is None:
         _cache = ProjectCache()
+
     return _cache

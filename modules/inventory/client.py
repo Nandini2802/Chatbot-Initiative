@@ -19,6 +19,7 @@ import httpx
 
 from core.errors import InventoryUnavailableError, SalesforceError
 from core.settings import settings
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,57 @@ class AsyncSalesforceClient:
             data = await client.get_active_projects()
     """
 
-    def __init__(self) -> None:
+    @staticmethod
+    def _extract_list(
+        data,
+        endpoint: str,
+    ) -> list[dict]:
+        """
+        Extract a list of records from a Salesforce response.
+
+        Raise an error for unexpected response structures
+        instead of treating them as zero results.
+        """
+        if isinstance(data, list):
+            records = data
+
+        elif isinstance(data, dict):
+            records = None
+
+            for key in (
+                "ActiveProjects",
+                "records",
+                "data",
+                "projects",
+                "units",
+                "Units",
+            ):
+                value = data.get(key)
+
+                if isinstance(value, list):
+                    records = value
+                    break
+
+            if records is None:
+                raise SalesforceError(
+                    f"Unexpected response structure from {endpoint}."
+                )
+
+        else:
+            raise SalesforceError(
+                f"Invalid response type from {endpoint}."
+            )
+
+        if not all(isinstance(item, dict) for item in records):
+            raise SalesforceError(
+                f"Invalid record structure from {endpoint}."
+            )
+
+        return records
+
+
+    def __init__(self, user_id: str | None = None) -> None:
+        self._user_id = user_id
         self._token: str | None = None
         self._token_expiry: float = 0.0
         self._lock = asyncio.Lock()
@@ -75,25 +126,58 @@ class AsyncSalesforceClient:
             try:
                 resp = await self._http.post(
                     _TOKEN_PATH,
-                    data={
+                    params={
                         "grant_type": "client_credentials",
                         "client_id": settings.sf_client_id,
                         "client_secret": settings.sf_client_secret,
+                    },
+                    headers={
+                        "User-Agent": "Mozilla/5.0",
                     },
                 )
                 resp.raise_for_status()
             except httpx.TimeoutException as exc:
                 raise SalesforceError("Salesforce token request timed out.") from exc
             except httpx.HTTPStatusError as exc:
+                status_code = exc.response.status_code
+
+                try:
+                    response_body = exc.response.json()
+                except ValueError:
+                    response_body = {}
+
+                error_code = (
+                    response_body.get("error", "unknown")
+                    if isinstance(response_body, dict)
+                    else "unknown"
+                )
+
+                logger.error(
+                    "salesforce_token_error: status=%s, error=%s",
+                    status_code,
+                    error_code,
+                )
+
                 raise SalesforceError(
-                    f"Salesforce token request failed: HTTP {exc.response.status_code}"
+                    f"Salesforce token request failed: "
+                    f"HTTP {status_code}, error={error_code}"
                 ) from exc
 
             body = resp.json()
             self._token = body["access_token"]
             # Salesforce tokens expire in ~2h; refresh 5 min early
-            issued_at = int(body.get("issued_at", 0)) / 1000  # ms → s
-            self._token_expiry = (issued_at or time.monotonic()) + 7200 - 300
+
+            expires_in = body.get("expires_in")
+            if expires_in is not None:
+                lifetime = float(expires_in)
+            else:
+                lifetime = 7200.0
+
+            self._token_expiry = (
+                time.monotonic()
+                + max(0.0, lifetime - 300.0)
+            )
+
             logger.info("sf_token_refreshed")
             return self._token
 
@@ -139,11 +223,22 @@ class AsyncSalesforceClient:
     async def _get(self, path: str) -> Any:
         assert self._http is not None
         token = await self._get_token()
+
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "Mozilla/5.0",
+        }
+
+        if self._user_id:
+            headers["user_id"] = self._user_id
+
         try:
             resp = await self._http.get(
                 path,
-                headers={"Authorization": f"Bearer {token}"},
+                headers=headers,
             )
+
         except httpx.TimeoutException as exc:
             raise SalesforceError(
                 f"Salesforce request timed out: {path}"
@@ -167,40 +262,118 @@ class AsyncSalesforceClient:
                 f"Salesforce returned HTTP {resp.status_code} for {path}"
             )
 
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError as exc:
+            raise SalesforceError(
+                f"Invalid JSON response from Salesforce: {path}"
+            ) from exc
+
 
     # ── Public API calls ──────────────────────────────────────────────────
 
-    async def get_active_projects(self) -> list[dict]:
-        """GET getActiveProjects — returns the full project directory."""
-        data = await self._get(f"{_APEX_BASE}/getActiveProjects")
-        if isinstance(data, list):
-            return data
-        # Some Apex REST responses wrap the list in a root key
-        if isinstance(data, dict):
-            for v in data.values():
-                if isinstance(v, list):
-                    return v
-        return []
 
-    async def get_units_by_project(self, project_id: str) -> list[dict]:
-        """GET getUnitsByProject/{projectId} — unit-level records for one project."""
-        data = await self._get(f"{_APEX_BASE}/getUnitsByProject/{project_id}")
-        if isinstance(data, list):
-            return data
+    async def get_active_projects(self) -> list[dict]:
+        data = await self._get(
+            "/services/apexrest/mobileApp/getActiveProjects"
+        )
+
+        projects = data.get("ActiveProjects", [])
+
+        print("Total active projects:", len(projects))
+
+        if projects and isinstance(projects[0], dict):
+            print("First project field names:", list(projects[0].keys()))
+
+        print("\n========== SALESFORCE ACTIVE PROJECTS ==========")
+        print("Response type:", type(data).__name__)
+
         if isinstance(data, dict):
-            for v in data.values():
-                if isinstance(v, list):
-                    return v
-        return []
+            print("Top-level keys:", list(data.keys()))
+
+            for key, value in data.items():
+                print(
+                    f"Key: {key} | "
+                    f"Type: {type(value).__name__}"
+                )
+
+                if isinstance(value, dict):
+                    print(
+                        "  Nested keys:",
+                        list(value.keys())
+                    )
+
+        elif isinstance(data, list):
+            print("Number of records:", len(data))
+
+            if data and isinstance(data[0], dict):
+                print(
+                    "First record keys:",
+                    list(data[0].keys())
+                )
+
+        print("===============================================\n")
+
+        return self._extract_list(
+            data,
+            "getActiveProjects",
+        )
+
+    
+    async def get_units_by_project(
+        self,
+        project_id: str,
+    ) -> list[dict]:
+        """
+        Retrieve units for a verified Salesforce project ID.
+        """
+        if not project_id or not project_id.strip():
+            raise SalesforceError(
+                "A valid project ID is required."
+            )
+
+        safe_id = quote(
+            project_id.strip(),
+            safe="",
+        )
+
+        data = await self._get(
+            f"{_APEX_BASE}/getUnitsByProject/{safe_id}"
+        )
+
+        return self._extract_list(
+            data,
+            "getUnitsByProject",
+        )
+
+
 
     async def get_all_units(self) -> list[dict]:
-        """GET GetAllUnitsVisibleToBroker — flat unit records across all projects."""
-        data = await self._get(f"{_APEX_BASE}/GetAllUnitsVisibleToBroker")
-        if isinstance(data, list):
-            return data
+        data = await self._get(
+            f"{_APEX_BASE}/GetAllUnitsVisibleToBroker"
+        )
+
+        print("\n===== GET ALL UNITS RESPONSE =====")
+        print("Response type:", type(data).__name__)
+
         if isinstance(data, dict):
-            for v in data.values():
-                if isinstance(v, list):
-                    return v
-        return []
+            print("Response keys:", list(data.keys()))
+
+            for key, value in data.items():
+                print(f"{key}: {type(value).__name__}")
+
+                if isinstance(value, list):
+                    print(f"Number of records: {len(value)}")
+
+        elif isinstance(data, list):
+            print("Number of records:", len(data))
+
+        else:
+            print("Response:", repr(data)[:500])
+
+        print("==================================\n")
+
+        return self._extract_list(
+            data,
+            "GetAllUnitsVisibleToBroker",
+        )
